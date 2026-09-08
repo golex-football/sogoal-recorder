@@ -100,8 +100,14 @@ function setupEventListeners() {
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        alert(`Failed to start recording: ${err.detail || "Unknown error"}`);
+        let errMsg = "Unknown error";
+        try {
+          const err = await res.json();
+          errMsg = err.detail || JSON.stringify(err);
+        } catch (e) {
+          errMsg = await res.text();
+        }
+        alert(`Failed to start recording: ${errMsg}`);
         return;
       }
 

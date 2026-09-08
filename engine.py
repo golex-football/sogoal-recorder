@@ -192,10 +192,14 @@ class RecordingManager:
             url = session.url.strip()
             # Determine actual tool
             is_direct_stream = any(url.lower().endswith(ext) or ext in url.lower() for ext in [".m3u8", ".mpd", ".ts", ".flv", "rtsp://", "rtmp://"])
+            is_web_portal = any(d in url.lower() for d in ["youtube.com", "youtu.be", "twitch.tv", "aparat.com", "telewebion.com", "anten.ir", "vimeo.com"])
             
             chosen_engine = session.capture_type
             if chosen_engine == "auto":
-                chosen_engine = "ffmpeg" if is_direct_stream else "ytdlp"
+                chosen_engine = "ffmpeg" if (is_direct_stream and not is_web_portal) else "ytdlp"
+            elif chosen_engine == "ffmpeg" and is_web_portal:
+                session.logs.append("Notice: Web portal URL detected. Auto-switching to yt-dlp extractor engine.")
+                chosen_engine = "ytdlp"
 
             session.logs.append(f"Selected engine: {chosen_engine} for URL: {url[:60]}...")
 
@@ -278,19 +282,27 @@ class RecordingManager:
                 if m_spd:
                     session.speed = m_spd.group(1)
 
-        stderr_task = asyncio.create_task(read_stderr())
-        await proc.wait()
+        ret = await proc.wait()
         await stderr_task
+        if ret != 0 and session.status != "stopping":
+            err_msg = session.logs[-1] if session.logs else f"FFmpeg exited with error code {ret}"
+            session.status = "error"
+            session.error_message = err_msg
 
     async def _run_ytdlp(self, session: RecordingSession, url: str):
         # yt-dlp recording
+        venv_ytdlp = Path(sys.executable).parent / "yt-dlp"
+        ytdlp_bin = str(venv_ytdlp) if venv_ytdlp.exists() else (shutil.which("yt-dlp") or "yt-dlp")
         preset = BITRATE_PRESETS.get(session.bitrate_preset, BITRATE_PRESETS["copy"])
         cmd = [
-            "yt-dlp",
+            ytdlp_bin,
             "--no-part",
             "--no-continue",
             "-o", session.output_path,
         ]
+
+        if shutil.which("node"):
+            cmd.extend(["--js-runtimes", "node"])
 
         if session.bitrate_preset == "audio_only":
             cmd.extend(["-x", "--audio-format", "m4a"])
@@ -305,7 +317,7 @@ class RecordingManager:
             cmd.extend(["-f", "bestvideo+bestaudio/best"])
 
         cmd.append(url)
-        session.logs.append(f"Starting yt-dlp download...")
+        session.logs.append(f"Starting yt-dlp ({ytdlp_bin})...")
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE,
@@ -340,8 +352,12 @@ class RecordingManager:
 
         t1 = asyncio.create_task(read_stdout())
         t2 = asyncio.create_task(read_stderr())
-        await proc.wait()
+        ret = await proc.wait()
         await asyncio.gather(t1, t2)
+        if ret != 0 and session.status != "stopping":
+            err_msg = session.logs[-1] if session.logs else f"yt-dlp failed with exit code {ret}"
+            session.status = "error"
+            session.error_message = err_msg
 
     async def _run_browser(self, session: RecordingSession, url: str):
         # Browser capture using Playwright or Chromium

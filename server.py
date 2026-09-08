@@ -8,7 +8,7 @@ from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -86,8 +86,15 @@ def add_preset(req: AddPresetRequest):
     return {"status": "success", "presets": presets}
 
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc: Exception):
+    import traceback
+    traceback.print_exc()
+    return JSONResponse(status_code=500, content={"detail": str(exc)})
+
+
 @app.post("/api/record/start")
-def start_recording(req: StartRecordRequest):
+async def start_recording(req: StartRecordRequest):
     url = req.url.strip()
     if not url:
         raise HTTPException(status_code=400, detail="Stream or page URL is required.")
