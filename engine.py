@@ -267,14 +267,27 @@ class RecordingManager:
         elif "480p" in session.bitrate_preset:
             stream_quality = "480p,best"
 
-        session.logs.append(f"Connecting to live stream with Streamlink ({stream_quality})...")
-        proc = await asyncio.create_subprocess_exec(
+        session.logs.append(f"Connecting to live stream with Streamlink ({stream_quality}, network-resilient mode)...")
+        sl_cmd = [
             streamlink_bin,
             "--force",
             "--loglevel", "info",
+            "--retry-open", "30",
+            "--retry-streams", "2",
+            "--retry-max", "30",
+            "--stream-timeout", "120",
+            "--stream-segment-timeout", "25",
+            "--stream-segment-attempts", "20",
+            "--stream-segment-threads", "3",
+            "--hls-playlist-reload-attempts", "40",
+            "--http-timeout", "30",
+            "--hls-segment-stream-data",
             "-o", temp_ts,
             stream_url,
             stream_quality,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *sl_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
@@ -511,11 +524,27 @@ class RecordingManager:
             ytdlp_bin,
             "--no-part",
             "--no-continue",
+            "--retries", "infinite",
+            "--fragment-retries", "infinite",
+            "--file-access-retries", "20",
+            "--retry-sleep", "linear=1::2",
+            "--socket-timeout", "30",
             "-o", session.output_path,
         ]
 
-        if shutil.which("node"):
-            cmd.extend(["--js-runtimes", "node"])
+        node_path = shutil.which("node") or shutil.which("nodejs")
+        if node_path:
+            cmd.extend(["--js-runtimes", f"node:{node_path}"])
+
+        # Check for cookies file or browser cookies
+        cookies_file = Path(__file__).resolve().parent / "cookies.txt"
+        if cookies_file.exists():
+            cmd.extend(["--cookies", str(cookies_file)])
+        else:
+            try:
+                cmd.extend(["--cookies-from-browser", "chrome"])
+            except Exception:
+                pass
 
         if session.bitrate_preset == "audio_only":
             cmd.extend(["-x", "--audio-format", "m4a"])
@@ -530,7 +559,7 @@ class RecordingManager:
             cmd.extend(["-f", "bestvideo+bestaudio/best"])
 
         cmd.append(url)
-        session.logs.append(f"Starting yt-dlp ({ytdlp_bin})...")
+        session.logs.append(f"Starting yt-dlp with auto-reconnect ({ytdlp_bin})...")
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE,
@@ -600,6 +629,16 @@ class RecordingManager:
                 page = await context.new_page()
                 session.logs.append(f"Navigating to {url}...")
                 await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                try:
+                    await page.evaluate("""() => {
+                        const videos = document.querySelectorAll('video');
+                        videos.forEach(v => {
+                            v.muted = false;
+                            v.play().catch(() => {});
+                        });
+                    }""")
+                except Exception:
+                    pass
                 session.status = "recording"
                 session.logs.append("Web page active. Recording video feed...")
 

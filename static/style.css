@@ -574,3 +574,16 @@ select:focus {
   background: #19232f;
   box-shadow: 0 0 10px var(--accent-glow);
 }
+
+.btn-channel-intl {
+  border-color: #1e3a5f;
+  color: #64b5f6;
+  background: #0d1a29;
+}
+
+.btn-channel-intl:hover {
+  border-color: #2196f3;
+  color: #90caf9;
+  background: #13273e;
+  box-shadow: 0 0 10px rgba(33, 150, 243, 0.35);
+}
