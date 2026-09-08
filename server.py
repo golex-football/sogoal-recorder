@@ -121,6 +121,13 @@ async def stop_recording(session_id: str):
     return {"status": "stopping", "session": session.to_dict()}
 
 
+@app.delete("/api/record/session/{session_id}")
+async def dismiss_session(session_id: str):
+    if session_id in manager.sessions:
+        del manager.sessions[session_id]
+    return {"status": "dismissed", "id": session_id}
+
+
 @app.get("/api/recordings/active")
 def get_active_recordings():
     return {"recordings": manager.get_all_sessions()}

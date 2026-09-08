@@ -230,12 +230,12 @@ function initWebSocket() {
 
 // Render Active Concurrent Recordings
 function renderActiveRecordings(recordings) {
-  activeSessions = recordings.filter(
+  const liveCount = recordings.filter(
     (r) => r.status === "recording" || r.status === "starting" || r.status === "stopping"
-  );
-  activeCountLabel.textContent = `${activeSessions.length} Active`;
+  ).length;
+  activeCountLabel.textContent = `${liveCount} Active`;
 
-  if (activeSessions.length === 0) {
+  if (!recordings || recordings.length === 0) {
     activeContainer.innerHTML = `<div class="empty-state">No streams currently recording. Enter a link above and click Start!</div>`;
     return;
   }
@@ -246,20 +246,56 @@ function renderActiveRecordings(recordings) {
     openLogs.add(el.dataset.id);
   });
 
-  activeContainer.innerHTML = activeSessions
+  activeContainer.innerHTML = recordings
     .map((session) => {
       const isStopping = session.status === "stopping";
+      const isError = session.status === "error";
+      const isCompleted = session.status === "completed";
       const isLogsOpen = openLogs.has(session.id) ? "open" : "";
-      const logLines = (session.logs || []).slice(-10).join("\n") || "Connecting...";
+      const logLines = (session.logs || []).slice(-12).join("\n") || "Connecting...";
 
-      return `
-      <div class="active-card ${session.status}" id="session-card-${session.id}">
-        <div class="active-card-top">
+      let topBadge = "";
+      if (isError) {
+        topBadge = `<div class="badge-error"><span>✕ FAILED</span></div>`;
+      } else if (isCompleted) {
+        topBadge = `<div class="badge-completed"><span>✓ SAVED</span></div>`;
+      } else {
+        topBadge = `
           <div class="badge-rec">
             <div class="pulse-dot"></div>
             <span>${isStopping ? "STOPPING..." : "RECORDING"}</span>
           </div>
-          <div class="live-timer">${session.elapsed_formatted}</div>
+        `;
+      }
+
+      let actionButtons = "";
+      if (isError) {
+        actionButtons = `
+          <div class="error-banner">${escapeHtml(session.error_message || "Stream failed or was blocked by host.")}</div>
+          <button class="btn-dismiss" onclick="dismissSession('${session.id}')">Dismiss Card</button>
+        `;
+      } else if (isCompleted) {
+        actionButtons = `
+          <div style="display:flex; gap:0.5rem;">
+            <button class="btn-play" style="flex:1; padding:0.65rem;" onclick="playVideo('${escapeQuote(session.output_path)}')">▶ Play</button>
+            <button class="btn-open" style="flex:1; padding:0.65rem;" onclick="openFolder('${escapeQuote(session.output_path)}')">Folder</button>
+            <button class="btn-dismiss" style="flex:0.6; padding:0.65rem;" onclick="dismissSession('${session.id}')">Dismiss</button>
+          </div>
+        `;
+      } else {
+        actionButtons = `
+          <button class="btn-stop" onclick="stopRecording('${session.id}')" ${isStopping ? "disabled" : ""}>
+            <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+            ${isStopping ? "Finalizing Stream..." : "Stop & Finalize Recording"}
+          </button>
+        `;
+      }
+
+      return `
+      <div class="active-card ${session.status}" id="session-card-${session.id}">
+        <div class="active-card-top">
+          ${topBadge}
+          <div class="live-timer" style="${isError ? "color: var(--danger);" : ""}">${session.elapsed_formatted}</div>
         </div>
 
         <div class="match-info-title">${escapeHtml(session.match_name)}</div>
@@ -284,10 +320,7 @@ function renderActiveRecordings(recordings) {
           </div>
         </div>
 
-        <button class="btn-stop" onclick="stopRecording('${session.id}')" ${isStopping ? "disabled" : ""}>
-          <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
-          ${isStopping ? "Finalizing Stream..." : "Stop & Finalize Recording"}
-        </button>
+        ${actionButtons}
 
         <button class="log-toggle" onclick="toggleLogs('${session.id}')">Toggle Live Stream Log</button>
         <div class="log-drawer ${isLogsOpen}" id="log-${session.id}" data-id="${session.id}">
@@ -298,6 +331,15 @@ function renderActiveRecordings(recordings) {
     })
     .join("");
 }
+
+// Dismiss Session
+window.dismissSession = async function (id) {
+  try {
+    await fetch(`${API_BASE}/api/record/session/${id}`, { method: "DELETE" });
+  } catch (err) {
+    console.error("Dismiss error:", err);
+  }
+};
 
 // Stop Recording
 window.stopRecording = async function (id) {

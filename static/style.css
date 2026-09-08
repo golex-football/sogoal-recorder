@@ -271,6 +271,16 @@ select:focus {
   box-shadow: 0 0 20px rgba(198, 255, 0, 0.08);
 }
 
+.active-card.error {
+  border-color: rgba(255, 51, 75, 0.6);
+  box-shadow: 0 0 20px rgba(255, 51, 75, 0.15);
+}
+
+.active-card.completed {
+  border-color: rgba(0, 230, 118, 0.5);
+  box-shadow: 0 0 20px rgba(0, 230, 118, 0.1);
+}
+
 .active-card-top {
   display: flex;
   align-items: center;
@@ -290,6 +300,62 @@ select:focus {
   align-items: center;
   gap: 6px;
   letter-spacing: 0.5px;
+}
+
+.badge-error {
+  background: rgba(255, 51, 75, 0.2);
+  border: 1px solid var(--danger);
+  color: #ff5267;
+  padding: 3px 9px;
+  border-radius: 20px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.badge-completed {
+  background: rgba(0, 230, 118, 0.15);
+  border: 1px solid var(--success);
+  color: var(--success);
+  padding: 3px 9px;
+  border-radius: 20px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.error-banner {
+  background: rgba(255, 51, 75, 0.12);
+  border-left: 3px solid var(--danger);
+  padding: 0.7rem 0.9rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: #ff9aa7;
+  margin-bottom: 1rem;
+  word-break: break-word;
+  line-height: 1.4;
+}
+
+.btn-dismiss {
+  background: #1c2633;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 0.65rem 1.2rem;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  width: 100%;
+  transition: all 0.2s;
+}
+
+.btn-dismiss:hover {
+  background: var(--border-color);
+  color: #ffffff;
 }
 
 .pulse-dot {
