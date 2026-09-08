@@ -1,0 +1,27 @@
+# Python & Virtual Environments
+.venv/
+venv/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Logs & Temp
+*.log
+temp/
+scratch/
+
+# Video outputs (ensure video files are never committed to git)
+*.mp4
+*.mkv
+*.ts
+*.webm
+*.avi
+*.part
+*.ytdl

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SoGoal Link Recorder</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" stroke="#0b0f14" stroke-width="2" fill="none"/>
+          <circle cx="12" cy="12" r="4" fill="#0b0f14"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-title">SoGoal <span>Recorder</span></div>
+      </div>
+      <div class="brand-badge" id="ws-status">Connecting...</div>
+    </div>
+    <div class="header-actions">
+      <button class="btn-secondary" id="btn-open-root-folder" title="Open destination directory">
+        <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"/></svg>
+        Open Storage
+      </button>
+      <button class="btn-secondary" id="btn-refresh-library" title="Refresh library">
+        <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+        Refresh
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="container">
+
+    <!-- New Recording Card -->
+    <section class="card">
+      <div class="card-title">
+        <span>⚡ Start New Recording Stream</span>
+        <span class="tag">Multi-Stream Enabled</span>
+      </div>
+
+      <form id="form-record">
+        <div class="form-grid">
+          
+          <!-- URL Input -->
+          <div class="form-group full-width">
+            <label for="input-url">Stream or Page Link (HLS .m3u8, Anten, Telewebion, YouTube, Twitch, etc.)</label>
+            <div class="input-with-action">
+              <input type="text" id="input-url" placeholder="https://.../stream.m3u8 or https://..." required>
+              <button type="button" class="btn-small" id="btn-paste">Paste</button>
+            </div>
+          </div>
+
+          <!-- Season Selection -->
+          <div class="form-group">
+            <label for="select-season">Season</label>
+            <div class="input-with-action">
+              <select id="select-season"></select>
+              <button type="button" class="btn-small" id="btn-add-season">+ New</button>
+            </div>
+          </div>
+
+          <!-- Competition Selection -->
+          <div class="form-group">
+            <label for="select-competition">Competition</label>
+            <div class="input-with-action">
+              <select id="select-competition"></select>
+              <button type="button" class="btn-small" id="btn-add-comp">+ New</button>
+            </div>
+          </div>
+
+          <!-- Match Name / ID -->
+          <div class="form-group">
+            <label for="input-match-name">Match ID or Name</label>
+            <input type="text" id="input-match-name" placeholder="match_id_4 or Esteghlal_vs_Persepolis" required>
+          </div>
+
+          <!-- Bitrate / Quality -->
+          <div class="form-group">
+            <label for="select-bitrate">Bitrate & Quality Preset</label>
+            <select id="select-bitrate"></select>
+          </div>
+
+          <!-- Engine Type -->
+          <div class="form-group">
+            <label for="select-engine">Capture Method</label>
+            <select id="select-engine">
+              <option value="auto">Auto-Detect (Stream / yt-dlp)</option>
+              <option value="ffmpeg">FFmpeg Direct (HLS / m3u8 / RTSP / RTMP)</option>
+              <option value="ytdlp">yt-dlp (YouTube, Twitch, Video Portals)</option>
+              <option value="browser">Web Page (Headless Chromium Tab)</option>
+            </select>
+          </div>
+
+        </div>
+
+        <button type="submit" class="btn-start" id="btn-submit-record">
+          <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
+          Start Recording Stream
+        </button>
+      </form>
+    </section>
+
+    <!-- Active Concurrent Recordings -->
+    <section class="card">
+      <div class="card-title">
+        <span>🔴 Active Recordings</span>
+        <span class="tag" id="active-count">0 Active</span>
+      </div>
+
+      <div id="active-recordings-container" class="active-grid">
+        <div class="empty-state">No streams currently recording. Enter a link above and click Start!</div>
+      </div>
+    </section>
+
+    <!-- Saved Library / Explorer -->
+    <section class="card">
+      <div class="card-title">
+        <span>📁 Saved Match Recordings</span>
+        <span class="tag" id="storage-root-label">/home/pc-1/Desktop/video recordings</span>
+      </div>
+
+      <div style="overflow-x: auto;">
+        <table class="library-table">
+          <thead>
+            <tr>
+              <th>File Name</th>
+              <th>Season</th>
+              <th>Competition</th>
+              <th>Match ID</th>
+              <th>Size</th>
+              <th>Recorded At</th>
+              <th style="text-align: right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="library-tbody">
+            <tr>
+              <td colspan="7" class="empty-state">Loading library recordings...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
