@@ -555,3 +555,22 @@ select:focus {
   padding: 3rem 1rem;
   color: var(--text-muted);
 }
+
+.btn-channel {
+  background: #141c24;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 0.4rem 0.85rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-channel:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: #19232f;
+  box-shadow: 0 0 10px var(--accent-glow);
+}

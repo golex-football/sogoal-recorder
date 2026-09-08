@@ -52,6 +52,7 @@ class RecordingSession:
     speed: str = "1.0x"
     logs: deque = field(default_factory=lambda: deque(maxlen=40))
     process: Optional[asyncio.subprocess.Process] = None
+    streamlink_proc: Optional[asyncio.subprocess.Process] = None
     task: Optional[asyncio.Task] = None
 
     def to_dict(self) -> dict:
@@ -95,11 +96,14 @@ class RecordingManager:
 
     def _update_metrics(self):
         for s in self.sessions.values():
-            if os.path.exists(s.output_path):
-                try:
-                    s.file_size = os.path.getsize(s.output_path)
-                except OSError:
-                    pass
+            check_paths = [s.output_path, getattr(s, "temp_file", None), s.output_path + ".part.ts"]
+            for cp in check_paths:
+                if cp and os.path.exists(cp):
+                    try:
+                        s.file_size = os.path.getsize(cp)
+                        break
+                    except OSError:
+                        pass
 
     def start_recording(
         self,
@@ -174,10 +178,17 @@ class RecordingManager:
             except Exception as e:
                 session.logs.append(f"Signal exception: {e}")
 
+        sl_proc = getattr(session, "streamlink_proc", None)
+        if sl_proc and sl_proc.returncode is None:
+            try:
+                sl_proc.send_signal(signal.SIGINT)
+            except Exception:
+                pass
+
         # Let the task finish and finalize
         if session.task:
             try:
-                await asyncio.wait_for(asyncio.shield(session.task), timeout=10.0)
+                await asyncio.wait_for(asyncio.shield(session.task), timeout=25.0)
             except asyncio.TimeoutError:
                 if proc and proc.returncode is None:
                     try:
@@ -190,27 +201,42 @@ class RecordingManager:
     async def _run_recording(self, session: RecordingSession):
         try:
             url = session.url.strip()
-            # Determine actual tool
+
+            # 1. Instant Telewebion Live Resolver (tv3, varzesh, etc.)
+            m_telewebion = re.search(r"telewebion\.(?:net|com)/(?:live/)?([^/?#]+)", url.lower())
+            if m_telewebion:
+                channel = m_telewebion.group(1)
+                master_url = f"https://ncdn.telewebion.net/{channel}/live/playlist.m3u8"
+                session.logs.append(f"Telewebion channel '{channel}' resolved: {master_url}")
+                await self._run_streamlink(session, master_url)
+                return
+
+            # 2. Direct HLS Stream Playlist
             is_direct_stream = any(url.lower().endswith(ext) or ext in url.lower() for ext in [".m3u8", ".mpd", ".ts", ".flv", "rtsp://", "rtmp://"])
-            is_web_portal = any(d in url.lower() for d in ["youtube.com", "youtu.be", "twitch.tv", "aparat.com", "telewebion.com", "anten.ir", "vimeo.com"])
-            
-            chosen_engine = session.capture_type
-            if chosen_engine == "auto":
-                chosen_engine = "ffmpeg" if (is_direct_stream and not is_web_portal) else "ytdlp"
-            elif chosen_engine == "ffmpeg" and is_web_portal:
-                session.logs.append("Notice: Web portal URL detected. Auto-switching to yt-dlp extractor engine.")
-                chosen_engine = "ytdlp"
+            if is_direct_stream and session.capture_type != "browser":
+                session.logs.append(f"Streaming feed recognized: {url[:60]}...")
+                await self._run_streamlink(session, url)
+                return
 
-            session.logs.append(f"Selected engine: {chosen_engine} for URL: {url[:60]}...")
-
-            if chosen_engine == "ffmpeg":
-                await self._run_ffmpeg(session, url)
-            elif chosen_engine == "ytdlp":
-                await self._run_ytdlp(session, url)
-            elif chosen_engine == "browser":
+            # 3. Explicit Capture Selection
+            if session.capture_type == "browser":
                 await self._run_browser(session, url)
-            else:
-                await self._run_ffmpeg(session, url)
+                return
+
+            if session.capture_type == "ytdlp":
+                await self._run_ytdlp(session, url)
+                return
+
+            # 4. Web Video Platforms (YouTube, Twitch)
+            is_video_portal = any(d in url.lower() for d in ["youtube.com", "youtu.be", "twitch.tv", "vimeo.com"])
+            if is_video_portal and session.capture_type != "ffmpeg":
+                session.logs.append(f"Video portal detected: {url[:60]}...")
+                await self._run_ytdlp(session, url)
+                return
+
+            # 5. Web Page Live Stream Sniffer (Anten, Aparat, Sports Sites, etc.)
+            session.logs.append(f"Auto-detecting live media stream from webpage: {url[:60]}...")
+            await self._sniff_and_record(session, url)
 
         except asyncio.CancelledError:
             session.logs.append("Recording cancelled.")
@@ -226,20 +252,206 @@ class RecordingManager:
                 session.file_size = os.path.getsize(session.output_path)
             session.logs.append(f"Finished. File size: {format_bytes(session.file_size)}")
 
-    async def _run_ffmpeg(self, session: RecordingSession, stream_url: str):
+    async def _run_streamlink(self, session: RecordingSession, stream_url: str):
+        streamlink_bin = str(Path(sys.executable).parent / "streamlink")
+        if not os.path.exists(streamlink_bin):
+            streamlink_bin = shutil.which("streamlink") or "streamlink"
+
+        is_mp4 = session.output_path.lower().endswith(".mp4")
+        temp_ts = session.output_path + ".part.ts" if is_mp4 else session.output_path
+        session.temp_file = temp_ts
+
+        stream_quality = "best"
+        if "720p" in session.bitrate_preset:
+            stream_quality = "720p,best"
+        elif "480p" in session.bitrate_preset:
+            stream_quality = "480p,best"
+
+        session.logs.append(f"Connecting to live stream with Streamlink ({stream_quality})...")
+        proc = await asyncio.create_subprocess_exec(
+            streamlink_bin,
+            "--force",
+            "--loglevel", "info",
+            "-o", temp_ts,
+            stream_url,
+            stream_quality,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        session.process = proc
+        session.status = "recording"
+
+        stop_event = asyncio.Event()
+
+        async def stats_monitor():
+            prev_size = 0
+            prev_time = time.time()
+            while not stop_event.is_set():
+                await asyncio.sleep(1.0)
+                if os.path.exists(temp_ts):
+                    curr_size = os.path.getsize(temp_ts)
+                    curr_time = time.time()
+                    dt = curr_time - prev_time
+                    if dt > 0 and curr_size > prev_size:
+                        rate_bps = ((curr_size - prev_size) * 8) / dt
+                        session.current_bitrate = f"{rate_bps / 1000:.0f} kbps"
+                    session.file_size = curr_size
+                    prev_size = curr_size
+                    prev_time = curr_time
+
+        monitor_task = asyncio.create_task(stats_monitor())
+
+        async def read_stdout():
+            while True:
+                line = await proc.stdout.readline()
+                if not line:
+                    break
+                text = line.decode("utf-8", errors="replace").strip()
+                if not text:
+                    continue
+                session.logs.append(text)
+                if "Opening stream:" in text:
+                    parts = text.split("Opening stream:")
+                    if len(parts) > 1:
+                        session.fps = parts[1].strip()
+
+        stdout_task = asyncio.create_task(read_stdout())
+        ret = await proc.wait()
+        stop_event.set()
+        await stdout_task
+        await monitor_task
+
+        # Finalize container if temp TS was used
+        if is_mp4 and os.path.exists(temp_ts) and os.path.getsize(temp_ts) > 0:
+            session.logs.append("Finalizing MP4 container (+faststart)...")
+            preset = BITRATE_PRESETS.get(session.bitrate_preset, BITRATE_PRESETS["copy"])
+            ffmpeg_args = preset.get("ffmpeg_args", ["-c", "copy"])
+
+            remux_cmd = [
+                "ffmpeg",
+                "-y",
+                "-hide_banner",
+                "-loglevel", "warning",
+                "-i", temp_ts,
+                *ffmpeg_args,
+                "-movflags", "+faststart",
+                session.output_path,
+            ]
+            remux_proc = await asyncio.create_subprocess_exec(
+                *remux_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await remux_proc.wait()
+            if remux_proc.returncode == 0 and os.path.exists(session.output_path) and os.path.getsize(session.output_path) > 0:
+                try:
+                    os.remove(temp_ts)
+                except OSError:
+                    pass
+                session.file_size = os.path.getsize(session.output_path)
+                session.logs.append(f"Recording ready: {Path(session.output_path).name} ({format_bytes(session.file_size)})")
+            else:
+                session.logs.append("Remux note: Preserved raw TS stream file.")
+                if not os.path.exists(session.output_path):
+                    final_ts = session.output_path.replace(".mp4", ".ts")
+                    os.replace(temp_ts, final_ts)
+                    session.output_path = final_ts
+                session.file_size = os.path.getsize(session.output_path)
+
+        if ret != 0 and session.status != "stopping" and (not os.path.exists(session.output_path) or os.path.getsize(session.output_path) == 0):
+            err_msg = session.logs[-1] if session.logs else f"Streamlink exited with code {ret}"
+            session.status = "error"
+            session.error_message = err_msg
+
+    async def _resolve_with_streamlink(self, stream_url: str) -> Optional[str]:
+        try:
+            streamlink_bin = str(Path(sys.executable).parent / "streamlink")
+            if not os.path.exists(streamlink_bin):
+                streamlink_bin = shutil.which("streamlink") or "streamlink"
+
+            proc = await asyncio.create_subprocess_exec(
+                streamlink_bin, "--stream-url", stream_url, "best",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode == 0:
+                res = stdout.decode("utf-8").strip()
+                if res.startswith("http"):
+                    return res
+        except Exception:
+            pass
+        return None
+
+    async def _sniff_and_record(self, session: RecordingSession, webpage_url: str):
+        found_stream = None
+        try:
+            from playwright.async_api import async_playwright
+            chrome_bin = "/usr/bin/google-chrome" if os.path.exists("/usr/bin/google-chrome") else None
+            launch_args = ["--no-sandbox", "--disable-setuid-sandbox", "--autoplay-policy=no-user-gesture-required"]
+
+            session.logs.append("Starting background stream sniffer...")
+            async with async_playwright() as p:
+                if chrome_bin:
+                    browser = await p.chromium.launch(headless=True, executable_path=chrome_bin, args=launch_args)
+                else:
+                    browser = await p.chromium.launch(headless=True, args=launch_args)
+
+                context = await browser.new_context(user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                page = await context.new_page()
+
+                def on_request(req):
+                    nonlocal found_stream
+                    u = req.url
+                    if any(ext in u.lower() for ext in [".m3u8", ".mpd", "live/playlist"]) and not found_stream:
+                        if "manifest" not in u.lower() or ".m3u8" in u.lower():
+                            found_stream = u
+
+                page.on("request", on_request)
+                try:
+                    await page.goto(webpage_url, timeout=25000)
+                    for _ in range(16):
+                        if found_stream:
+                            break
+                        await asyncio.sleep(0.5)
+                except Exception as e:
+                    session.logs.append(f"Sniffer note: {e}")
+                finally:
+                    await browser.close()
+
+        except Exception as ex:
+            session.logs.append(f"Sniffer exception: {ex}")
+
+        if found_stream:
+            session.logs.append(f"Captured stream: {found_stream[:70]}...")
+            try:
+                await self._run_streamlink(session, found_stream)
+            except Exception as e:
+                session.logs.append(f"Streamlink fallback to FFmpeg: {e}")
+                await self._run_ffmpeg(session, found_stream, referer=webpage_url)
+        else:
+            session.logs.append("No direct HLS stream found on page. Recording browser view directly...")
+            await self._run_browser(session, webpage_url)
+
+    async def _run_ffmpeg(self, session: RecordingSession, stream_url: str, referer: Optional[str] = None):
         preset = BITRATE_PRESETS.get(session.bitrate_preset, BITRATE_PRESETS["copy"])
         ffmpeg_args = preset["ffmpeg_args"]
+
+        headers_val = "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n"
+        if referer:
+            headers_val += f"Referer: {referer}\r\n"
 
         cmd = [
             "ffmpeg",
             "-y",
             "-hide_banner",
             "-loglevel", "info",
+            "-live_start_index", "-3",
             "-reconnect", "1",
             "-reconnect_at_eof", "1",
             "-reconnect_streamed", "1",
             "-reconnect_delay_max", "5",
-            "-headers", "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n",
+            "-headers", headers_val,
             "-i", stream_url,
             *ffmpeg_args,
             "-movflags", "+faststart",
@@ -282,6 +494,7 @@ class RecordingManager:
                 if m_spd:
                     session.speed = m_spd.group(1)
 
+        stderr_task = asyncio.create_task(read_stderr())
         ret = await proc.wait()
         await stderr_task
         if ret != 0 and session.status != "stopping":

@@ -50,11 +50,25 @@
       <form id="form-record">
         <div class="form-grid">
           
+          <!-- Quick Channels Bar -->
+          <div class="form-group full-width" style="margin-bottom: -0.25rem;">
+            <label style="display: flex; justify-content: space-between;">
+              <span>⚡ Quick Sports Channels (Telewebion)</span>
+              <span style="color: var(--accent); text-transform: none; font-size: 0.75rem;">1-Click Auto-Fill</span>
+            </label>
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.25rem;">
+              <button type="button" class="btn-channel" onclick="setQuickChannel('https://telewebion.net/live/tv3', 'IRIB_TV3_Live', 'Persian_Gulf_Pro_League')">📺 IRIB TV3 (شبکه سه)</button>
+              <button type="button" class="btn-channel" onclick="setQuickChannel('https://telewebion.net/live/varzesh', 'IRIB_Varzesh_Live', 'Persian_Gulf_Pro_League')">⚽ IRIB Varzesh (شبکه ورزش)</button>
+              <button type="button" class="btn-channel" onclick="setQuickChannel('https://telewebion.net/live/tv1', 'IRIB_TV1_Live', 'National')">📺 IRIB TV1 (شبکه یک)</button>
+              <button type="button" class="btn-channel" onclick="setQuickChannel('https://telewebion.net/live/tv2', 'IRIB_TV2_Live', 'National')">📺 IRIB TV2 (شبکه دو)</button>
+            </div>
+          </div>
+
           <!-- URL Input -->
           <div class="form-group full-width">
-            <label for="input-url">Stream or Page Link (HLS .m3u8, Anten, Telewebion, YouTube, Twitch, etc.)</label>
+            <label for="input-url">Stream or Page Link (Telewebion, Anten, HLS .m3u8, etc.)</label>
             <div class="input-with-action">
-              <input type="text" id="input-url" placeholder="https://.../stream.m3u8 or https://..." required>
+              <input type="text" id="input-url" placeholder="https://telewebion.net/live/tv3 or https://.../playlist.m3u8" required>
               <button type="button" class="btn-small" id="btn-paste">Paste</button>
             </div>
           </div>

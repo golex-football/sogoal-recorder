@@ -456,3 +456,13 @@ function escapeQuote(str) {
   if (!str) return "";
   return str.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
+
+// Quick Channel Selector
+window.setQuickChannel = function (url, matchName, comp) {
+  if (inputUrl) inputUrl.value = url;
+  if (inputMatchName) inputMatchName.value = matchName;
+  if (selectComp && comp) selectComp.value = comp;
+  if (selectBitrate) selectBitrate.value = "copy";
+  if (selectEngine) selectEngine.value = "auto";
+};
+
